@@ -4,4 +4,6 @@ __pycache__/
 *.pyc
 .env
 .flake8
+.csv
 csv
+exp
