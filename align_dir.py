@@ -36,7 +36,7 @@ def add_sma(df, period, col_name):
 
 
 def add_uptrend(df, sma_col, out_col):
-    df[out_col] = df[sma_col] > df[sma_col].shift(1)
+    df[out_col] = df[sma_col].shift(1) > df[sma_col].shift(2)
     return df
 
 

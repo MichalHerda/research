@@ -64,6 +64,8 @@ def run_backtest(df, rsi_below, rr_ratio):
                     'close_time': close_time,
                     'open_price': entry_price,
                     'close_price': sl,
+                    'sl': sl,
+                    'tp': tp,
                     'TP': ''
                 })
                 sl_count += 1
@@ -75,6 +77,8 @@ def run_backtest(df, rsi_below, rr_ratio):
                     'close_time': close_time,
                     'open_price': entry_price,
                     'close_price': tp,
+                    'sl': sl,
+                    'tp': tp,
                     'TP': True
                 })
                 tp_count += 1
