@@ -2,87 +2,8 @@ import pandas as pd
 import sys
 import os
 
-SPREADS = {
-    "EURUSD": 0.00009,
-    "GBPUSD": 0.00012,
-    "USDJPY": 0.012,
-    "USDCHF": 0.00015,
-    "USDCAD": 0.00018,
 
-    "AUDUSD": 0.00010,
-    "NZDUSD": 0.00018,
-
-    "EURGBP": 0.00009,
-    "EURJPY": 0.042,
-    "EURCHF": 0.00018,
-    "EURCAD": 0.00036,
-    "EURAUD": 0.00030,
-    "EURNZD": 0.00055,
-
-    "GBPJPY": 0.030,
-    "GBPCHF": 0.00058,
-    "GBPCAD": 0.00055,
-    "GBPAUD": 0.00052,
-    "GBPNZD": 0.00090,
-
-    "AUDJPY": 0.026,
-    "AUDCHF": 0.00047,
-    "AUDCAD": 0.00028,
-    "AUDNZD": 0.00035,
-
-    "NZDJPY": 0.033,
-    "NZDCHF": 0.00056,
-    "NZDCAD": 0.00038,
-
-    "CADJPY": 0.032,
-    "CADCHF": 0.00047,
-
-    "CHFJPY": 0.065,
-
-    "GOLD": 0.49,
-    "US100": 1.90,
-    "[SP500]": 0.60
-}
-
-DIGITS = {
-    "AUDCAD": 5,
-    "AUDCHF": 5,
-    "AUDJPY": 3,
-    "AUDNZD": 5,
-    "AUDUSD": 5,
-    "CADCHF": 5,
-    "CADJPY": 3,
-    "CHFJPY": 3,
-    "EURAUD": 5,
-    "EURCAD": 5,
-    "EURCHF": 5,
-    "EURGBP": 5,
-    "EURJPY": 3,
-    "EURNZD": 5,
-    "EURUSD": 5,
-    "GBPAUD": 5,
-    "GBPCAD": 5,
-    "GBPCHF": 5,
-    "GBPNZD": 5,
-    "GBPUSD": 5,
-    "NZDCAD": 5,
-    "NZDCHF": 5,
-    "NZDJPY": 3,
-    "NZDUSD": 5,
-    "US100":  2,
-    "USDCAD": 5,
-    "USDCHF": 5,
-    "USDJPY": 3,
-    "[SP500]": 2,
-    "[NQ100]": 2,
-    "GBPJPY": 3,
-    "GOLD": 2
-}
-
-SL_MODIFICATOR = 0.05
-
-
-def run_backtest(df, rsi_below, rr_ratio, spread, digits):
+def run_backtest(df, rsi_below, rr_ratio):
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df['RSI_M5_M5'] = pd.to_numeric(df['RSI_M5_M5'], errors='coerce')
     df['last_pivot_H1'] = pd.to_numeric(df['last_pivot_H1'], errors='coerce')
@@ -119,24 +40,14 @@ def run_backtest(df, rsi_below, rr_ratio, spread, digits):
             if pd.isna(row_1['last_pivot_H1']):
                 continue
 
-            entry_price_bid = row_0['open_M5']
-            entry_price = entry_price_bid + spread
-
+            entry_price = row_0['open_M5']
             sl = row_1['last_pivot_H1']
-            # sl_points = entry_price - sl
-
-            # sl_modify = sl_points * SL_MODIFICATOR
-            sl = sl - spread
-
-            entry_price = round(entry_price, digits)
-            sl = round(sl, digits)
 
             if sl >= entry_price:
                 continue
 
             risk = entry_price - sl
             tp = entry_price + (risk * rr_ratio)
-            tp = round(tp, digits)
 
             open_time = row_0['timestamp']
             in_position = True
@@ -194,20 +105,9 @@ def main(input_dir, rsi_below, rr_ratio):
 
         df = pd.read_csv(file_path, sep=';')
 
-        instrument = file.replace('.csv', '').split('_')[0]
-        spread = SPREADS.get(instrument, 0)
-        digits = DIGITS.get(instrument, 0)
+        trades_df, tp_count, sl_count, win_ratio = run_backtest(df, rsi_below, rr_ratio)
 
-        if spread == 0:
-            print(f"WARNING: No spread for {instrument}")
-
-        if digits == 0:
-            print(f"WARNING: No digits for {instrument}")
-
-        print(instrument, ", spread: ", spread, ", digits: ", digits)
-
-        trades_df, tp_count, sl_count, win_ratio = run_backtest(df, rsi_below, rr_ratio, spread, digits)
-
+        instrument = file.replace('.csv', '')
         output_file = os.path.join(output_dir, f"{instrument}_backtest.csv")
 
         trades_df.to_csv(output_file, index=False)
