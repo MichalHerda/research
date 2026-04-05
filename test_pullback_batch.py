@@ -1,6 +1,7 @@
 import pandas as pd
 import sys
 import os
+from zoneinfo import ZoneInfo
 
 SPREADS = {
     "EURUSD": 0.00009,
@@ -8,37 +9,29 @@ SPREADS = {
     "USDJPY": 0.012,
     "USDCHF": 0.00015,
     "USDCAD": 0.00018,
-
     "AUDUSD": 0.00010,
     "NZDUSD": 0.00018,
-
     "EURGBP": 0.00009,
     "EURJPY": 0.042,
     "EURCHF": 0.00018,
     "EURCAD": 0.00036,
     "EURAUD": 0.00030,
     "EURNZD": 0.00055,
-
     "GBPJPY": 0.030,
     "GBPCHF": 0.00058,
     "GBPCAD": 0.00055,
     "GBPAUD": 0.00052,
     "GBPNZD": 0.00090,
-
     "AUDJPY": 0.026,
     "AUDCHF": 0.00047,
     "AUDCAD": 0.00028,
     "AUDNZD": 0.00035,
-
     "NZDJPY": 0.033,
     "NZDCHF": 0.00056,
     "NZDCAD": 0.00038,
-
     "CADJPY": 0.032,
     "CADCHF": 0.00047,
-
     "CHFJPY": 0.065,
-
     "GOLD": 0.49,
     "US100": 1.90,
     "[SP500]": 0.60
@@ -74,12 +67,26 @@ DIGITS = {
     "USDCHF": 5,
     "USDJPY": 3,
     "[SP500]": 2,
-    "[NQ100]": 2,
+    "[NQ100]": 2,       # stara nazwa dla US100
     "GBPJPY": 3,
     "GOLD": 2
 }
 
-SL_MODIFICATOR = 0.05
+BEGIN_NIGHT_BREAK_NY = 15  # 15:00
+END_NIGHT_BREAK_NY = 19  # 19:00
+
+
+def is_trading_allowed(timestamp):
+    broker_tz = ZoneInfo("Europe/Bucharest")
+    timestamp = timestamp.replace(tzinfo=broker_tz)
+
+    ny_time = timestamp.astimezone(ZoneInfo("America/New_York"))
+    hour = ny_time.hour
+
+    if BEGIN_NIGHT_BREAK_NY <= hour < END_NIGHT_BREAK_NY:
+        return False
+
+    return True
 
 
 def run_backtest(df, rsi_below, rr_ratio, spread, digits):
@@ -103,6 +110,9 @@ def run_backtest(df, rsi_below, rr_ratio, spread, digits):
         row_1 = df.iloc[i-1]
         row_2 = df.iloc[i-2]
 
+        if not in_position and not is_trading_allowed(row_0['timestamp']):
+            continue
+
         if not in_position:
             # trend
             if not (row_0['UP_H1_H1'] == True and row_0['UP_D1_D1'] == True):           # noqa
@@ -119,23 +129,17 @@ def run_backtest(df, rsi_below, rr_ratio, spread, digits):
             if pd.isna(row_1['last_pivot_H1']):
                 continue
 
-            entry_price_bid = row_0['open_M5']
-            entry_price = entry_price_bid + spread
+            entry_price = row_0['open_M5'] + spread                     # w tabelkach mamy ceny BID
+            sl = row_1['last_pivot_H1'] - spread                        # spread to jest umowny bufor dla SL
 
-            sl = row_1['last_pivot_H1']
-            # sl_points = entry_price - sl
-
-            # sl_modify = sl_points * SL_MODIFICATOR
-            sl = sl - spread
-
-            entry_price = round(entry_price, digits)
+            entry_price = round(entry_price, digits)                    # zaokraglamy na wszelki wypadek
             sl = round(sl, digits)
 
             if sl >= entry_price:
                 continue
 
-            risk = entry_price - sl
-            tp = entry_price + (risk * rr_ratio)
+            sl_ratio = entry_price - sl
+            tp = entry_price + (sl_ratio * rr_ratio)
             tp = round(tp, digits)
 
             open_time = row_0['timestamp']
