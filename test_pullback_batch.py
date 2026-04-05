@@ -75,6 +75,10 @@ DIGITS = {
 BEGIN_NIGHT_BREAK_NY = 15  # 15:00
 END_NIGHT_BREAK_NY = 19  # 19:00
 
+ATR_H1_SL_MIN = 0.5     # minimalny SL względem ATR H1
+ATR_D1_TP_MAX = 1.1     # maksymalny TP względem ATR D1
+SPREAD_SL_MAX = 0.2     # max spread jako % SL
+
 
 def is_trading_allowed(timestamp):
     broker_tz = ZoneInfo("Europe/Bucharest")
@@ -93,6 +97,8 @@ def run_backtest(df, rsi_below, rr_ratio, spread, digits):
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df['RSI_M5_M5'] = pd.to_numeric(df['RSI_M5_M5'], errors='coerce')
     df['last_pivot_H1'] = pd.to_numeric(df['last_pivot_H1'], errors='coerce')
+    df['ATR_H1_H1'] = pd.to_numeric(df['ATR_H1_H1'], errors='coerce')
+    df['ATR_D1_D1'] = pd.to_numeric(df['ATR_D1_D1'], errors='coerce')
 
     trades = []
 
@@ -139,8 +145,32 @@ def run_backtest(df, rsi_below, rr_ratio, spread, digits):
                 continue
 
             sl_ratio = entry_price - sl
+
+            # --- ATR H1 FILTER ---
+            atr_h1 = row_1['ATR_H1_H1']
+            if pd.isna(atr_h1):
+                continue
+
+            if sl_ratio < (atr_h1 * ATR_H1_SL_MIN):
+                continue
+
+            # --- TP CALC ---
             tp = entry_price + (sl_ratio * rr_ratio)
             tp = round(tp, digits)
+
+            # --- ATR D1 FILTER ---
+            atr_d1 = row_1['ATR_D1_D1']
+            if pd.isna(atr_d1):
+                continue
+
+            tp_distance = tp - entry_price
+
+            if tp_distance > (atr_d1 * ATR_D1_TP_MAX):
+                continue
+
+            # --- SPREAD FILTER ---
+            if spread > (sl_ratio * SPREAD_SL_MAX):
+                continue
 
             open_time = row_0['timestamp']
             in_position = True

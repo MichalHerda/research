@@ -5,9 +5,13 @@ import pandas as pd
 from pathlib import Path
 
 
+ATR_H1_PERIOD = 500
+ATR_D1_PERIOD = 500
+
 # =========================
 # UTILS
 # =========================
+
 
 def load_csv(path):
     df = pd.read_csv(path, sep=';')
@@ -67,6 +71,17 @@ def add_pivots(df):
     df['pivot_low'] = df['pivot_low'].shift(2)
     df['last_pivot'] = df['pivot_low'].ffill()
 
+    return df
+
+
+def add_atr(df, period, col_name):
+    high_low = df['high'] - df['low']
+    high_close = (df['high'] - df['close'].shift()).abs()
+    low_close = (df['low'] - df['close'].shift()).abs()
+
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+
+    df[col_name] = tr.rolling(window=period).mean()
     return df
 
 
@@ -139,10 +154,12 @@ def process_instrument(folder, period_h1, period_d1, output_dir):
         df_h1 = add_sma(df_h1, period_h1, 'SMA_H1')
         df_h1 = add_uptrend(df_h1, 'SMA_H1', 'UP_H1')
         df_h1 = add_pivots(df_h1)
+        df_h1 = add_atr(df_h1, ATR_H1_PERIOD, 'ATR_H1')
 
         # D1
         df_d1 = add_sma(df_d1, period_d1, 'SMA_D1')
         df_d1 = add_uptrend(df_d1, 'SMA_D1', 'UP_D1')
+        df_d1 = add_atr(df_d1, ATR_D1_PERIOD, 'ATR_D1')
 
         # M5
         df_m5 = add_rsi(df_m5)
