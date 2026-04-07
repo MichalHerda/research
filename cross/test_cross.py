@@ -2,7 +2,6 @@ import pandas as pd
 import os
 import sys
 
-# ====== CONFIG (bierzesz z poprzedniego kodu) ======
 SPREADS = {
     "EURUSD": 0.00009, "GBPUSD": 0.00012, "USDJPY": 0.012,
     "USDCHF": 0.00015, "USDCAD": 0.00018, "AUDUSD": 0.00010,
@@ -44,7 +43,7 @@ def run_backtest(df, spread, digits):
 
     pip_factor = 10 ** digits
 
-    for i in range(2, len(df) - 1):  # -1 żeby mieć next candle do exitów
+    for i in range(2, len(df) - 1):
         r0 = df.iloc[i]
         r1 = df.iloc[i - 1]
         r2 = df.iloc[i - 2]
@@ -52,17 +51,14 @@ def run_backtest(df, spread, digits):
 
         # ================= ENTRY =================
         if not in_position:
-            # filtr D1
-            if not (r0['FAST_ABOVE_D1'] == True):               # noqa
+            if not (r0['FAST_ABOVE_D1'] == True):                           # noqa
                 continue
 
-            # brak danych
             if pd.isna(r2['SMA_FAST_M15']) or pd.isna(r2['SMA_SLOW_M15']):
                 continue
             if pd.isna(r1['SMA_FAST_M15']) or pd.isna(r1['SMA_SLOW_M15']):
                 continue
 
-            # CROSS UP (bez lookahead)
             cross_up = (
                 r2['SMA_FAST_M15'] <= r2['SMA_SLOW_M15'] and
                 r1['SMA_FAST_M15'] > r1['SMA_SLOW_M15']
@@ -71,7 +67,6 @@ def run_backtest(df, spread, digits):
             if not cross_up:
                 continue
 
-            # SL
             if pd.isna(r1['LAST_MIN']):
                 continue
 
@@ -96,13 +91,16 @@ def run_backtest(df, spread, digits):
             low = r0['low_x']
             high = r0['high_x']
 
-            # --- SL first ---
+            # --- SL ---
             if low <= sl:
                 result = (sl - entry) * pip_factor
 
                 trades.append({
                     "open_time": open_time,
                     "close_time": r0['timestamp'],
+                    "open_price": entry,
+                    "close_price": sl,
+                    "exit_type": "SL",
                     "result": result
                 })
 
@@ -116,13 +114,16 @@ def run_backtest(df, spread, digits):
                 trades.append({
                     "open_time": open_time,
                     "close_time": r0['timestamp'],
+                    "open_price": entry,
+                    "close_price": tp,
+                    "exit_type": "TP",
                     "result": result
                 })
 
                 in_position = False
                 continue
 
-            # --- CROSS DOWN EXIT (z opóźnieniem!) ---
+            # --- CROSS DOWN ---
             if (
                 not pd.isna(r2['SMA_FAST_M15']) and
                 not pd.isna(r2['SMA_SLOW_M15']) and
@@ -135,12 +136,17 @@ def run_backtest(df, spread, digits):
                 )
 
                 if cross_down:
-                    exit_price = r_next['open_x']  # ZERO LOOKAHEAD FIX
+                    exit_price = r_next['open_x']
                     result = (exit_price - entry) * pip_factor
+
+                    exit_type = "PLUS" if result > 0 else "MINUS"
 
                     trades.append({
                         "open_time": open_time,
                         "close_time": r_next['timestamp'],
+                        "open_price": entry,
+                        "close_price": exit_price,
+                        "exit_type": exit_type,
                         "result": result
                     })
 

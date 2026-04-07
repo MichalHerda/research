@@ -49,12 +49,28 @@ def add_signal_cross(df, fast, slow):
 
 
 def add_last_min(df, fast, slow):
+
     cond = df[fast] < df[slow]
 
-    df['min_tmp'] = df['low'].where(cond)
-    df['LAST_MIN'] = df['min_tmp'].ffill()
+    last_min = []
+    current_min = None
 
-    df.drop(columns=['min_tmp'], inplace=True)
+    for i in range(len(df)):
+
+        if cond.iloc[i]:
+            low = df['low'].iloc[i]
+
+            if current_min is None:
+                current_min = low
+            else:
+                current_min = min(current_min, low)
+
+        else:
+            current_min = None
+
+        last_min.append(current_min)
+
+    df['LAST_MIN'] = pd.Series(last_min).ffill()
 
     return df
 
