@@ -16,15 +16,21 @@ def load_data(filepath):
 
 def classify(df):
     """
-    Sortowanie swingów:
-    od największego deviation względem ATR
+    1. Filtrujemy tylko swingi DOWN (poniżej EMA)
+    2. Sortujemy malejąco po extreme_dev_atr_pct
     """
-    df_sorted = df.sort_values(
-        by="max_dev_atr_pct",
+
+    df_down = df[df['direction'] == 'DOWN'].copy()
+
+    if df_down.empty:
+        return df_down
+
+    df_sorted = df_down.sort_values(
+        by="extreme_dev_atr_pct",
         ascending=False
     ).reset_index(drop=True)
 
-    # opcjonalnie: ranking
+    # ranking
     df_sorted['rank'] = df_sorted.index + 1
 
     return df_sorted
@@ -38,8 +44,11 @@ def process_file(filepath, output_dir):
 
     df_classified = classify(df)
 
+    if df_classified.empty:
+        return
+
     filename = os.path.basename(filepath)
-    output_filename = filename.replace("swings_", "classified_")
+    output_filename = filename.replace("swings_", "classified_minus_")
 
     output_path = os.path.join(output_dir, output_filename)
 
@@ -48,25 +57,22 @@ def process_file(filepath, output_dir):
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python3 classify_atr.py <directory>")
+        print("Usage: python3 classify_atr_minus.py <directory>")
         sys.exit(1)
 
     base_dir = sys.argv[1]
 
-    # zakładamy, że input to folder ze swingami
-    input_dir = base_dir
-
-    if not os.path.exists(input_dir):
-        print(f"[ERROR] Missing directory: {input_dir}")
+    if not os.path.exists(base_dir):
+        print(f"[ERROR] Missing directory: {base_dir}")
         sys.exit(1)
 
-    output_dir = os.path.join(base_dir, "classified_atr")
+    output_dir = os.path.join(base_dir, "classified_atr_minus")
     os.makedirs(output_dir, exist_ok=True)
 
-    files = [f for f in os.listdir(input_dir) if f.endswith(".csv")]
+    files = [f for f in os.listdir(base_dir) if f.endswith(".csv")]
 
     for f in files:
-        filepath = os.path.join(input_dir, f)
+        filepath = os.path.join(base_dir, f)
 
         try:
             process_file(filepath, output_dir)
