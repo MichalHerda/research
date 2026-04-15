@@ -17,9 +17,14 @@ cross/align_cross
 
 sample_data
 
-z_score/sample_data
-z_score/output_M5_abs
-z_score/swings
-z_score/swings_abs
+zscore/sample_data
+zscore/output_M5_abs
+zscore/swings
+zscore/swings_abs
+zscore/M5
+zscore/H1
+zscore/bt
+zscore/zscore2ema
+zscore/filtered
 
 *.csv

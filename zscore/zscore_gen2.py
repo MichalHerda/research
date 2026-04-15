@@ -4,7 +4,6 @@ import sys
 import os
 import glob
 import pandas as pd
-# import numpy as np
 
 
 def load_csv(filepath):
@@ -35,34 +34,43 @@ def compute_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
 
+# to jest sposób obliczania ATR zgodny z tym co jest na wykresach w MT4:
 def compute_atr(df, period):
-    high = df['high']
-    low = df['low']
-    close = df['close']
+    # 1. Oblicz True Range (TR)
+    high_low = df['high'] - df['low']
+    high_close = (df['high'] - df['close'].shift(1)).abs()
+    low_close = (df['low'] - df['close'].shift(1)).abs()
 
-    prev_close = close.shift(1)
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
 
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs()
-    ], axis=1).max(axis=1)
-
-    # Wilder smoothing (EMA-like)
-    atr = tr.ewm(alpha=1/period, adjust=False).mean()
+    # 2. MT4 używa SMA do ATR
+    atr = tr.rolling(window=period).mean()
 
     return atr
 
 
-def process_file(filepath, ema_period, atr_period):
+def process_file(filepath, ema_period, ema_period_slow, atr_period):
     df = load_csv(filepath)
 
+    # FAST EMA (bez zmian)
     df['EMA'] = compute_ema(df['close'], ema_period)
 
-    # deviation: close - EMA
+    # >>> NOWE: SLOW EMA <<<
+    df['EMA_SLOW'] = compute_ema(df['close'], ema_period_slow)
+
+    # deviation: close - EMA (bez zmian)
     df['deviation'] = df['close'] - df['EMA']
 
     df['ATR'] = compute_atr(df, atr_period)
+
+    # >>> DODANE: normalizacja dokładnie jak w MQL4 <<<
+    df['deviation_atr'] = df['deviation'] / df['ATR']
+
+    # >>> NOWE: różnica EMA (z zachowaniem znaku) <<<
+    df['EMA_diff'] = df['EMA'] - df['EMA_SLOW']
+
+    # >>> NOWE: trend bool <<<
+    df['uptrend'] = df['EMA_diff'] > 0
 
     # Przycięcie danych – usuwamy NaN
     df = df.dropna().reset_index(drop=True)
@@ -71,14 +79,15 @@ def process_file(filepath, ema_period, atr_period):
 
 
 def main():
-    if len(sys.argv) != 5:
-        print("Usage: python3 z_score_gen.py <directory> <timeframe> <ema_period> <atr_period>")
+    if len(sys.argv) != 6:
+        print("Usage: python3 z_score_gen.py <directory> <timeframe> <ema_period> <ema_period_slow> <atr_period>")
         sys.exit(1)
 
     base_dir = sys.argv[1]
     timeframe = sys.argv[2]
     ema_period = int(sys.argv[3])
-    atr_period = int(sys.argv[4])
+    ema_period_slow = int(sys.argv[4])
+    atr_period = int(sys.argv[5])
 
     output_dir = os.path.join(base_dir, f"output_{timeframe}")
     os.makedirs(output_dir, exist_ok=True)
@@ -98,7 +107,7 @@ def main():
         filepath = files[0]
 
         try:
-            df = process_file(filepath, ema_period, atr_period)
+            df = process_file(filepath, ema_period, ema_period_slow, atr_period)
 
             output_filename = f"{instrument}_{timeframe}.csv"
             output_path = os.path.join(output_dir, output_filename)

@@ -35,28 +35,19 @@ def compute_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
 
+# to jest sposób obliczania ATR zgodny z tym co jest na wykresach w MT4:
+
 def compute_atr(df, period):
-    high = df['high']
-    low = df['low']
-    close = df['close']
+    # 1. Oblicz True Range (TR)
+    high_low = df['high'] - df['low']
+    high_close = (df['high'] - df['close'].shift(1)).abs()
+    low_close = (df['low'] - df['close'].shift(1)).abs()
 
-    # >>> KLUCZOWA POPRAWKA <<<
-    prev_close = close.shift(-1)
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
 
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs()
-    ], axis=1).max(axis=1)
-
-    atr = pd.Series(index=df.index, dtype=float)
-
-    # pierwsza wartość ATR jak w MT4
-    atr.iloc[period] = tr.iloc[1:period+1].mean()
-
-    # Wilder smoothing
-    for i in range(period + 1, len(df)):
-        atr.iloc[i] = ((atr.iloc[i-1] * (period - 1)) + tr.iloc[i]) / period
+    # 2. MT4 używa SMA do ATR, a nie wygładzania Wildera
+    # rolling(period).mean() to dokładnie to, co robi iATR w MT4
+    atr = tr.rolling(window=period).mean()
 
     return atr
 
@@ -70,6 +61,9 @@ def process_file(filepath, ema_period, atr_period):
     df['deviation'] = df['close'] - df['EMA']
 
     df['ATR'] = compute_atr(df, atr_period)
+
+    # >>> DODANE: normalizacja dokładnie jak w MQL4 <<<
+    df['deviation_atr'] = df['deviation'] / df['ATR']
 
     # Przycięcie danych – usuwamy NaN
     df = df.dropna().reset_index(drop=True)
