@@ -26,5 +26,10 @@ zscore/H1
 zscore/bt
 zscore/zscore2ema
 zscore/filtered
+zscore/legacy
+zscore/classified_atr_minus
+zscore/classified_atr_plus
+zscore/output_H1
+zscore/monthly_classified
 
 *.csv
