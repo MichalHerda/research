@@ -8,6 +8,7 @@ __pycache__/
 csv
 exp
 
+sample_data_processed_v1
 
 ###
 fractal_rsi/backtests
@@ -35,3 +36,7 @@ zscore/monthly_classified
 *.csv
 
 slope_ctx/sample_data
+
+ema_slope/sample_data
+
+ema_slope/sample_data_processed
