@@ -103,6 +103,55 @@ def compute_slope(fast_ema, atr, slope_period):
 
 
 # ============================================================
+# MT4 Fractals (no lookahead bias)
+# ============================================================
+
+def compute_fractals(df):
+
+    high = df['high']
+    low = df['low']
+
+    # --------------------------------------------------------
+    # Raw fractal detection
+    # --------------------------------------------------------
+
+    fractal_high_raw = (
+        (high.shift(2) < high) &
+        (high.shift(1) < high) &
+        (high.shift(-1) < high) &
+        (high.shift(-2) < high)
+    )
+
+    fractal_low_raw = (
+        (low.shift(2) > low) &
+        (low.shift(1) > low) &
+        (low.shift(-1) > low) &
+        (low.shift(-2) > low)
+    )
+
+    # --------------------------------------------------------
+    # Fractal values
+    # --------------------------------------------------------
+
+    fractal_high = df['high'].where(fractal_high_raw)
+    fractal_low = df['low'].where(fractal_low_raw)
+
+    # --------------------------------------------------------
+    # Last known fractals
+    # --------------------------------------------------------
+
+    last_fractal_high = fractal_high.shift(2).ffill()
+    last_fractal_low = fractal_low.shift(2).ffill()
+
+    return (
+        fractal_low,
+        fractal_high,
+        last_fractal_low,
+        last_fractal_high
+    )
+
+
+# ============================================================
 # Trend classification
 # ============================================================
 
@@ -236,6 +285,17 @@ def process_csv(
     )
 
     # --------------------------------------------------------
+    # Fractals
+    # --------------------------------------------------------
+
+    (
+        df['fractal_low'],
+        df['fractal_high'],
+        df['last_fractal_low'],
+        df['last_fractal_high']
+    ) = compute_fractals(df)
+
+    # --------------------------------------------------------
     # Classification
     # --------------------------------------------------------
 
@@ -266,6 +326,10 @@ def process_csv(
             'low',
             'close',
             'volume',
+            'fractal_low',
+            'fractal_high',
+            'last_fractal_low',
+            'last_fractal_high',
             'ema_dev',
             'regime'
         ]
@@ -275,8 +339,12 @@ def process_csv(
     # Remove NaN
     # --------------------------------------------------------
 
-    df = df.dropna().reset_index(drop=True)
-
+    df = df.dropna(
+        subset=[
+            'ema_dev',
+            'regime',
+        ]
+    ).reset_index(drop=True)
     # --------------------------------------------------------
     # Save
     # --------------------------------------------------------
