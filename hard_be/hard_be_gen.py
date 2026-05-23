@@ -85,16 +85,7 @@ def compute_ema(series, period):
 
 # ============================================================
 # EMA deviation normalized by ATR
-# (close - fast_ema) / atr
 # ============================================================
-
-def compute_ema_deviation(close, fast_ema, atr):
-    return (close - fast_ema) / atr
-
-
-"""
-
-Poniższą funkcję możemy zastosować wtedy gdy liczymy EMA ze skrajnych wartości
 
 
 def compute_ema_deviation(high, low, fast_ema, atr):
@@ -107,7 +98,6 @@ def compute_ema_deviation(high, low, fast_ema, atr):
         z_high,
         z_low
     )
-"""
 
 
 # ============================================================
@@ -291,7 +281,8 @@ def process_csv(
     )
 
     df['ema_dev'] = compute_ema_deviation(
-        df['close'],
+        df['high'],
+        df['low'],
         df['ema_fast'],
         df['atr']
     )
