@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 
 
+DATE_FORMAT = "%Y.%m.%d %H:%M:%S"
+
 REQUIRED_COLUMNS = [
     'timestamp', 'open', 'high', 'low', 'close',
 ]
@@ -22,7 +24,7 @@ def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
     if missing_columns:
         sys.exit(f"[ERROR] In {file_path} are missing columns: {missing_columns}")
 
-    df['timestamp'] = pd.to_datetime(df['timestamp'], format="%Y.%m.%d %H:%M:%S", errors="coerce")
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format=DATE_FORMAT, errors="coerce")
     df = df.dropna(subset=['timestamp'])
 
     float_columns = REQUIRED_COLUMNS[1:]
@@ -33,7 +35,7 @@ def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
 
 def main():
     if len(sys.argv) != 2:
-        sys.exit("[ERROR] usage: python3 read_ohlcv_template.py <file>")
+        sys.exit(f"[ERROR] usage: python3 {Path(sys.argv[0]).name} <file>")
 
     file_path = Path(sys.argv[1])
 
