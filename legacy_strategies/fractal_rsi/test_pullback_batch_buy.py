@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# [DEPRECATED] Preserved strictly for historical and educational purposes.
 
 import pandas as pd
 import sys

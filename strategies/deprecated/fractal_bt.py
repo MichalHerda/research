@@ -1,3 +1,5 @@
+# [DEPRECATED] Preserved strictly for historical and educational purposes.
+
 """
 Custom Systematic Backtesting Engine for Fractal-Based Strategies
 

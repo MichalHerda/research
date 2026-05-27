@@ -1,3 +1,5 @@
+# [DEPRECATED] Preserved strictly for historical and educational purposes.
+
 import pandas as pd
 # import numpy as np
 import os
@@ -307,7 +309,7 @@ def main(input_dir: str):
 
         # Najlepsza konfiguracja
         if grid_df.empty or grid_df.iloc[0]['total'] < 10:
-            print(f'  Za mało transakcji — pomijam.')
+            print('  Za mało transakcji — pomijam.')
             continue
 
         best = grid_df.iloc[0]
@@ -336,7 +338,7 @@ def main(input_dir: str):
         summary_df = pd.DataFrame(summary_rows).sort_values('expectancy_r', ascending=False)
         summary_path = os.path.join(output_dir, '_summary.csv')
         summary_df.to_csv(summary_path, index=False)
-        print(f'\n=== SUMMARY ===')
+        print('\n=== SUMMARY ===')
         print(summary_df.to_string(index=False))
         print(f'\nZapisano: {summary_path}')
 

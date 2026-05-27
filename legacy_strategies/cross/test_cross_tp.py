@@ -1,3 +1,5 @@
+# [DEPRECATED] Preserved strictly for historical and educational purposes.
+
 import pandas as pd
 import os
 import sys
