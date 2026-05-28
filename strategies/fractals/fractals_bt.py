@@ -1,11 +1,8 @@
 # version based on new template: backtest_tpl.py
 
-#
-#   in progress
-#
-
 import pandas as pd
 import sys
+import math
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -24,8 +21,8 @@ TRANSACTION_TYPE = 'BUY'
 BREAKEVEN_MODIFICATION = 0.1
 STOP_LOSS_BUFFOR = 0.9
 BREAKEVEN = False
-ENABLE_LOGGING_STEP_BY_STEP = True
-BACKTESTERS_LOGS = []
+ENABLE_BACKTEST_LOGGING = True
+TRADE_LOGS_LIST = []
 
 
 @dataclass
@@ -167,6 +164,31 @@ def append_trade_logs(current_trade: Trade, trade_logs: list) -> None:
     })
 
 
+def append_backtest_logs(state: MarketState, in_position: bool, current_trade: Trade | None, trade_logs_list: list) -> None:
+    log_entry = {
+        'timestamp': state.timestamp,
+        'in_position': in_position,
+        'close_price': state.close,
+        'current_sl': None,
+        'current_tp': None,
+        'trade_type': None
+    }
+
+    if in_position and current_trade is not None:
+        log_entry['current_sl'] = current_trade.stop_loss
+        log_entry['current_tp'] = current_trade.take_profit
+        log_entry['trade_type'] = current_trade.transaction_type
+    else:
+        if TRANSACTION_TYPE == 'BUY':
+            log_entry['last_low_fractal_value'] = state.last_low_fractal_value
+            log_entry['last_low_fractal_appearance_time'] = state.last_low_fractal_appearance_time
+        elif TRANSACTION_TYPE == 'SELL':
+            log_entry['last_high_fractal_value'] = state.last_high_fractal_value
+            log_entry['last_high_fractal_appearance_time'] = state.last_high_fractal_appearance_time
+
+    trade_logs_list.append(log_entry)
+
+
 def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
     """
     Read CSV, columns presence validation, data conversion
@@ -204,9 +226,6 @@ def run_backtest(df: pd.DataFrame) -> list:
     trade_logs = []
     current_trade = None
     in_position = False
-    check_last_fractal_appearance = True     # check only first timestamp of fractal (visible as historical data)
-    last_fractal_appearance_time = None
-    last_fractal_value = 0
     state = MarketState()
 
     for row in df.itertuples(index=False):
@@ -218,22 +237,16 @@ def run_backtest(df: pd.DataFrame) -> list:
         state.close = row.close
 
         if TRANSACTION_TYPE == 'BUY':
-            if check_last_fractal_appearance and state.last_low_fractal_value is not None:
-                last_fractal_appearance_time = state.last_low_fractal_appearance_time = row.timestamp
-                last_fractal_value = state.last_low_fractal_value = row.fractal_low
-                check_last_fractal_appearance = False
-            else:
-                state.last_low_fractal_appearance_time = last_fractal_appearance_time
-                state.last_low_fractal_value = last_fractal_value
+            if not math.isnan(row.fractal_low):
+                if state.last_low_fractal_value is None or row.fractal_low != state.last_low_fractal_value:
+                    state.last_low_fractal_appearance_time = row.timestamp
+                    state.last_low_fractal_value = row.fractal_low
 
         if TRANSACTION_TYPE == 'SELL':
-            if check_last_fractal_appearance and state.last_high_fractal_value is not None:
-                last_fractal_appearance_time = state.last_high_fractal_appearance_time = row.timestamp
-                last_fractal_value = state.last_high_fractal_value = row.fractal_high
-                check_last_fractal_appearance = False
-            else:
-                state.last_high_fractal_appearance_time = last_fractal_appearance_time
-                state.last_high_fractal_value = last_fractal_value
+            if not math.isnan(row.fractal_high):
+                if state.last_high_fractal_value is None or row.fractal_high != state.last_high_fractal_value:
+                    state.last_high_fractal_appearance_time = row.timestamp
+                    state.last_high_fractal_value = row.fractal_high
 
         if not in_position:
             if is_signal(state, TRANSACTION_TYPE):
@@ -241,24 +254,6 @@ def run_backtest(df: pd.DataFrame) -> list:
                 take_profit = calculate_take_profit(state, TRANSACTION_TYPE, stop_loss)
                 current_trade = open_position(state, TRANSACTION_TYPE, stop_loss, take_profit)
                 in_position = True
-
-                if ENABLE_LOGGING_STEP_BY_STEP:
-                    BACKTESTERS_LOGS.append({
-                        'timestamp': state.timestamp,
-                        'in_position': False,
-                        'signal': True,
-                        'last_fractal_time': last_fractal_appearance_time,
-                        'last_fractal_value': last_fractal_value
-                    })
-            else:
-                if ENABLE_LOGGING_STEP_BY_STEP:
-                    BACKTESTERS_LOGS.append({
-                        'timestamp': state.timestamp,
-                        'in_position': False,
-                        'signal': False,
-                        'last_fractal_time': last_fractal_appearance_time,
-                        'last_fractal_value': last_fractal_value
-                    })
 
         elif in_position:
 
@@ -269,19 +264,27 @@ def run_backtest(df: pd.DataFrame) -> list:
             if is_stop_loss_reached(state, current_trade):
                 close_position(state, current_trade, 'SL')
                 append_trade_logs(current_trade, trade_logs)
+                if ENABLE_BACKTEST_LOGGING:
+                    append_backtest_logs(state, in_position, current_trade, TRADE_LOGS_LIST)
                 current_trade = None
                 in_position = False
+
                 continue
 
             if is_take_profit_reached(state, current_trade):
                 close_position(state, current_trade, 'TP')
                 append_trade_logs(current_trade, trade_logs)
+                if ENABLE_BACKTEST_LOGGING:
+                    append_backtest_logs(state, in_position, current_trade, TRADE_LOGS_LIST)
                 current_trade = None
                 in_position = False
                 continue
 
             if BREAKEVEN and is_breakeven_condition(state, current_trade):
                 apply_breakeven(current_trade)
+
+        if ENABLE_BACKTEST_LOGGING:
+            append_backtest_logs(state, in_position, current_trade, TRADE_LOGS_LIST)
 
     return trade_logs
 
@@ -300,6 +303,11 @@ def main():
     results = run_backtest(df)
     output_file = file_path.parent/f"{file_path.stem}_results.csv"
     save_results_to_csv(results, output_file)
+
+    if ENABLE_BACKTEST_LOGGING:
+        telemetry_file = file_path.parent / f"{file_path.stem}_step_by_step.csv"
+        save_results_to_csv(TRADE_LOGS_LIST, telemetry_file)
+        print(f"[INFO] Telemetry saved successfully to: {telemetry_file}")
 
 
 if __name__ == "__main__":
