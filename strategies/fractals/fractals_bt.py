@@ -1,8 +1,8 @@
-# NOTE: This boilerplate is designed specifically for path-dependent trading strategies
-# where state transitions (like trailing stops, multi-stage entries, or time-window visibility)
-# depend strictly on the previous step's context. Since these strategies cannot be safely
-# vectorized using pure Pandas/NumPy operations, this structured loop serves as a reusable
-# template for chronological, time-series iteration.
+# version based on new template: backtest_tpl.py
+
+#
+#   in progress
+#
 
 import pandas as pd
 import sys
@@ -14,13 +14,18 @@ DATE_FORMAT = "%Y.%m.%d %H:%M:%S"
 
 REQUIRED_COLUMNS = [
     'timestamp', 'open', 'high', 'low', 'close',
+    'high_open', 'high_high', 'high_low', 'high_close',
+    'fractal_low', 'fractal_high'
 ]
 
 LOT_SIZE_DEFAULT = 1
 RISK_REWARD_RATIO = 1
 TRANSACTION_TYPE = 'BUY'
 BREAKEVEN_MODIFICATION = 0.1
+STOP_LOSS_BUFFOR = 0.9
 BREAKEVEN = False
+ENABLE_LOGGING_STEP_BY_STEP = True
+BACKTESTERS_LOGS = []
 
 
 @dataclass
@@ -48,21 +53,51 @@ class MarketState:
     high: float = 0.0
     low: float = 0.0
     close: float = 0.0
+    last_low_fractal_appearance_time: datetime | None = None
+    last_low_fractal_value: float | None = None
+    last_high_fractal_appearance_time: datetime | None = None
+    last_high_fractal_value: float | None = None
 
 
-def is_signal(state: MarketState) -> bool:
-    # Prototype stub for strategy entry logic
-    pass
+def is_last_fractal_visible(timestamp: datetime, last_fractal_time: datetime) -> bool:
+    if timestamp is None or last_fractal_time is None:
+        return False
+    return (timestamp - last_fractal_time).total_seconds() >= 7200
+
+
+def is_signal(state: MarketState, transaction_type: str) -> bool:
+    if transaction_type == 'BUY':
+        last_fractal_time = state.last_low_fractal_appearance_time
+    elif transaction_type == 'SELL':
+        last_fractal_time = state.last_high_fractal_appearance_time
+    else:
+        print("unsupported transaction type")
+        return False
+    return is_last_fractal_visible(state.timestamp, last_fractal_time)
 
 
 def calculate_stop_loss(state: MarketState, transaction_type: str) -> float:
-    # Prototype stub for strategy exit logic
-    pass
+    if transaction_type == 'BUY':
+        return state.last_low_fractal_value - STOP_LOSS_BUFFOR
+    elif transaction_type == 'SELL':
+        return state.last_high_fractal_value + STOP_LOSS_BUFFOR
+    else:
+        print("calculate_stop_loss: unsupported transaction type")
+        return 0
 
 
-def calculate_take_profit(state: MarketState, transaction_type: str) -> float:
-    # Prototype stub for strategy exit logic
-    pass
+def calculate_take_profit(state: MarketState, transaction_type: str, stop_loss: float) -> float:
+    if transaction_type == 'BUY':
+        stop_loss_point_value = state.open - stop_loss
+        take_profit_point_value = stop_loss_point_value * RISK_REWARD_RATIO
+        return state.open + take_profit_point_value
+    elif transaction_type == 'SELL':
+        stop_loss_point_value = stop_loss - state.open
+        take_profit_point_value = stop_loss_point_value * RISK_REWARD_RATIO
+        return state.open - take_profit_point_value
+    else:
+        print("calculate_take_profit: unsupported transaction type")
+        return 0
 
 
 def is_breakeven_condition(state: MarketState, current_trade: Trade) -> bool:
@@ -104,23 +139,17 @@ def close_position(state: MarketState, current_trade: Trade, trade_result: str) 
 
 def is_stop_loss_reached(state: MarketState, current_trade: Trade) -> bool:
     if current_trade.transaction_type == 'BUY':
-        pass
-        # return True
+        return state.low <= current_trade.stop_loss
     if current_trade.transaction_type == 'SELL':
-        pass
-        # return True
-    print(f"[ERROR] unsupported transaction type: {current_trade.transaction_type}")
+        return state.high >= current_trade.stop_loss
     return False
 
 
 def is_take_profit_reached(state: MarketState, current_trade: Trade) -> bool:
     if current_trade.transaction_type == 'BUY':
-        pass
-        # return True
+        return state.high >= current_trade.take_profit
     if current_trade.transaction_type == 'SELL':
-        pass
-        # return True
-    print(f"[ERROR] unsupported transaction type: {current_trade.transaction_type}")
+        return state.low <= current_trade.take_profit
     return False
 
 
@@ -175,7 +204,9 @@ def run_backtest(df: pd.DataFrame) -> list:
     trade_logs = []
     current_trade = None
     in_position = False
-
+    check_last_fractal_appearance = True     # check only first timestamp of fractal (visible as historical data)
+    last_fractal_appearance_time = None
+    last_fractal_value = 0
     state = MarketState()
 
     for row in df.itertuples(index=False):
@@ -186,12 +217,48 @@ def run_backtest(df: pd.DataFrame) -> list:
         state.low = row.low
         state.close = row.close
 
+        if TRANSACTION_TYPE == 'BUY':
+            if check_last_fractal_appearance and state.last_low_fractal_value is not None:
+                last_fractal_appearance_time = state.last_low_fractal_appearance_time = row.timestamp
+                last_fractal_value = state.last_low_fractal_value = row.fractal_low
+                check_last_fractal_appearance = False
+            else:
+                state.last_low_fractal_appearance_time = last_fractal_appearance_time
+                state.last_low_fractal_value = last_fractal_value
+
+        if TRANSACTION_TYPE == 'SELL':
+            if check_last_fractal_appearance and state.last_high_fractal_value is not None:
+                last_fractal_appearance_time = state.last_high_fractal_appearance_time = row.timestamp
+                last_fractal_value = state.last_high_fractal_value = row.fractal_high
+                check_last_fractal_appearance = False
+            else:
+                state.last_high_fractal_appearance_time = last_fractal_appearance_time
+                state.last_high_fractal_value = last_fractal_value
+
         if not in_position:
-            if is_signal(state):
+            if is_signal(state, TRANSACTION_TYPE):
                 stop_loss = calculate_stop_loss(state, TRANSACTION_TYPE)
-                take_profit = calculate_take_profit(state, TRANSACTION_TYPE)
+                take_profit = calculate_take_profit(state, TRANSACTION_TYPE, stop_loss)
                 current_trade = open_position(state, TRANSACTION_TYPE, stop_loss, take_profit)
                 in_position = True
+
+                if ENABLE_LOGGING_STEP_BY_STEP:
+                    BACKTESTERS_LOGS.append({
+                        'timestamp': state.timestamp,
+                        'in_position': False,
+                        'signal': True,
+                        'last_fractal_time': last_fractal_appearance_time,
+                        'last_fractal_value': last_fractal_value
+                    })
+            else:
+                if ENABLE_LOGGING_STEP_BY_STEP:
+                    BACKTESTERS_LOGS.append({
+                        'timestamp': state.timestamp,
+                        'in_position': False,
+                        'signal': False,
+                        'last_fractal_time': last_fractal_appearance_time,
+                        'last_fractal_value': last_fractal_value
+                    })
 
         elif in_position:
 
