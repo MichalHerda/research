@@ -17,12 +17,17 @@ REQUIRED_COLUMNS = [
 
 LOT_SIZE_DEFAULT = 1
 RISK_REWARD_RATIO = 1
-TRANSACTION_TYPE = 'BUY'
+TRANSACTION_TYPE = 'SELL'
 BREAKEVEN_MODIFICATION = 0.1
-STOP_LOSS_BUFFOR = 0.9
+STOP_LOSS_BUFFER = 0.9
 BREAKEVEN = False
-ENABLE_BACKTEST_LOGGING = True
-TRADE_LOGS_LIST = []
+
+
+@dataclass
+class BacktestResult:
+    trades: list
+    telemetry: list
+    summary: dict
 
 
 @dataclass
@@ -51,8 +56,10 @@ class MarketState:
     low: float = 0.0
     close: float = 0.0
     last_low_fractal_appearance_time: datetime | None = None
+    last_low_fractal_used_time: datetime | None = None
     last_low_fractal_value: float | None = None
     last_high_fractal_appearance_time: datetime | None = None
+    last_high_fractal_used_time: datetime | None = None
     last_high_fractal_value: float | None = None
 
 
@@ -65,8 +72,16 @@ def is_last_fractal_visible(timestamp: datetime, last_fractal_time: datetime) ->
 def is_signal(state: MarketState, transaction_type: str) -> bool:
     if transaction_type == 'BUY':
         last_fractal_time = state.last_low_fractal_appearance_time
+        if state.last_low_fractal_appearance_time is None:
+            return False
+        if state.last_low_fractal_used_time == state.last_low_fractal_appearance_time:
+            return False
     elif transaction_type == 'SELL':
         last_fractal_time = state.last_high_fractal_appearance_time
+        if state.last_high_fractal_appearance_time is None:
+            return False
+        if state.last_high_fractal_used_time == state.last_high_fractal_appearance_time:
+            return False
     else:
         print("unsupported transaction type")
         return False
@@ -75,9 +90,9 @@ def is_signal(state: MarketState, transaction_type: str) -> bool:
 
 def calculate_stop_loss(state: MarketState, transaction_type: str) -> float:
     if transaction_type == 'BUY':
-        return state.last_low_fractal_value - STOP_LOSS_BUFFOR
+        return state.last_low_fractal_value - STOP_LOSS_BUFFER
     elif transaction_type == 'SELL':
-        return state.last_high_fractal_value + STOP_LOSS_BUFFOR
+        return state.last_high_fractal_value + STOP_LOSS_BUFFER
     else:
         print("calculate_stop_loss: unsupported transaction type")
         return 0
@@ -99,7 +114,7 @@ def calculate_take_profit(state: MarketState, transaction_type: str, stop_loss: 
 
 def is_breakeven_condition(state: MarketState, current_trade: Trade) -> bool:
     # Prototype stub for strategy exit logic
-    pass
+    raise NotImplementedError("is_breakeven_condition not implemented")
 
 
 def apply_breakeven(current_trade: Trade) -> None:
@@ -221,12 +236,17 @@ def save_results_to_csv(results: list, output: Path) -> None:
     results_df.to_csv(output, sep=";", date_format=DATE_FORMAT, index=False)
 
 
-def run_backtest(df: pd.DataFrame) -> list:
+def run_backtest(df: pd.DataFrame, enable_logging=True) -> BacktestResult:
     print("[INFO] start running backtest")
     trade_logs = []
+    telemetry_logs = []
     current_trade = None
     in_position = False
     state = MarketState()
+    summary = {
+        "TP": 0,
+        "SL": 0
+    }
 
     for row in df.itertuples(index=False):
 
@@ -255,6 +275,11 @@ def run_backtest(df: pd.DataFrame) -> list:
                 current_trade = open_position(state, TRANSACTION_TYPE, stop_loss, take_profit)
                 in_position = True
 
+                if TRANSACTION_TYPE == 'BUY':
+                    state.last_low_fractal_used_time = state.last_low_fractal_appearance_time
+                if TRANSACTION_TYPE == 'SELL':
+                    state.last_high_fractal_used_time = state.last_high_fractal_appearance_time
+
         elif in_position:
 
             # Worst-case scenario execution order (Conservative approach).
@@ -263,19 +288,20 @@ def run_backtest(df: pd.DataFrame) -> list:
 
             if is_stop_loss_reached(state, current_trade):
                 close_position(state, current_trade, 'SL')
+                summary["SL"] += 1
                 append_trade_logs(current_trade, trade_logs)
-                if ENABLE_BACKTEST_LOGGING:
-                    append_backtest_logs(state, in_position, current_trade, TRADE_LOGS_LIST)
+                if enable_logging:
+                    append_backtest_logs(state, in_position, current_trade, telemetry_logs)
                 current_trade = None
                 in_position = False
-
                 continue
 
             if is_take_profit_reached(state, current_trade):
                 close_position(state, current_trade, 'TP')
+                summary["TP"] += 1
                 append_trade_logs(current_trade, trade_logs)
-                if ENABLE_BACKTEST_LOGGING:
-                    append_backtest_logs(state, in_position, current_trade, TRADE_LOGS_LIST)
+                if enable_logging:
+                    append_backtest_logs(state, in_position, current_trade, telemetry_logs)
                 current_trade = None
                 in_position = False
                 continue
@@ -283,10 +309,14 @@ def run_backtest(df: pd.DataFrame) -> list:
             if BREAKEVEN and is_breakeven_condition(state, current_trade):
                 apply_breakeven(current_trade)
 
-        if ENABLE_BACKTEST_LOGGING:
-            append_backtest_logs(state, in_position, current_trade, TRADE_LOGS_LIST)
+        if enable_logging:
+            append_backtest_logs(state, in_position, current_trade, telemetry_logs)
 
-    return trade_logs
+    return BacktestResult(
+        trades=trade_logs,
+        telemetry=telemetry_logs,
+        summary=summary
+    )
 
 
 def main():
@@ -294,20 +324,24 @@ def main():
         sys.exit(f"[ERROR] usage: python3 {Path(sys.argv[0]).name} <file>")
 
     file_path = Path(sys.argv[1])
+    enable_backtest_logging = True
 
     df = load_and_clean_ohlcv(file_path)
     print("[INFO] Data pipeline finished successfully.")
     print(f"[INFO] head: {df.head()}")
     print(f"[INFO] tail: {df.tail()}")
 
-    results = run_backtest(df)
+    backtest_results = run_backtest(df)
     output_file = file_path.parent/f"{file_path.stem}_results.csv"
-    save_results_to_csv(results, output_file)
+    save_results_to_csv(backtest_results.trades, output_file)
 
-    if ENABLE_BACKTEST_LOGGING:
+    if enable_backtest_logging:
         telemetry_file = file_path.parent / f"{file_path.stem}_step_by_step.csv"
-        save_results_to_csv(TRADE_LOGS_LIST, telemetry_file)
+        save_results_to_csv(backtest_results.telemetry, telemetry_file)
         print(f"[INFO] Telemetry saved successfully to: {telemetry_file}")
+
+    summary_file = file_path.parent / f"{file_path.stem}_summary.csv"
+    save_results_to_csv([backtest_results.summary], summary_file)
 
 
 if __name__ == "__main__":
