@@ -17,11 +17,13 @@ REQUIRED_COLUMNS = [
 ]
 
 LOT_SIZE_DEFAULT = 1
-RISK_REWARD_RATIO = 1
-TRANSACTION_TYPE = 'BUY'
+RISK_REWARD_RATIO = 1.1
+TRANSACTION_TYPE = 'SELL'
 BREAKEVEN_MODIFICATION = 0.1
 STOP_LOSS_BUFFER = 0.9
 BREAKEVEN = False
+SPREAD = 0.7
+MAX_SPREAD_PERCENTAGE = 10
 
 
 @dataclass
@@ -109,6 +111,35 @@ def is_signal(state: MarketState, transaction_type: str, high_tf_seconds: int) -
         print("unsupported transaction type")
         return False
     return is_last_fractal_visible(state.timestamp, last_fractal_time, high_tf_seconds)
+
+
+def calculate_minimum_stop_loss() -> float:
+    return (SPREAD / MAX_SPREAD_PERCENTAGE) * 100.0
+
+
+def enforce_minimum_stop_loss(
+    state: MarketState,
+    transaction_type: str,
+    stop_loss: float
+) -> float:
+
+    minimum_sl_distance = calculate_minimum_stop_loss()
+
+    if transaction_type == "BUY":
+
+        current_distance = state.open - stop_loss
+
+        if current_distance < minimum_sl_distance:
+            stop_loss = state.open - minimum_sl_distance
+
+    elif transaction_type == "SELL":
+
+        current_distance = stop_loss - state.open
+
+        if current_distance < minimum_sl_distance:
+            stop_loss = state.open + minimum_sl_distance
+
+    return stop_loss
 
 
 def calculate_stop_loss(state: MarketState, transaction_type: str) -> float:
@@ -301,6 +332,7 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
         if not in_position:
             if is_signal(state, TRANSACTION_TYPE, high_tf_seconds):
                 stop_loss = calculate_stop_loss(state, TRANSACTION_TYPE)
+                stop_loss = enforce_minimum_stop_loss(state, TRANSACTION_TYPE, stop_loss)
                 take_profit = calculate_take_profit(state, TRANSACTION_TYPE, stop_loss)
                 current_trade = open_position(state, TRANSACTION_TYPE, stop_loss, take_profit)
                 in_position = True
@@ -369,15 +401,15 @@ def main():
     )
 
     backtest_results = run_backtest(df, high_tf_seconds)
-    output_file = file_path.parent/f"{file_path.stem}_results.csv"
+    output_file = file_path.parent/f"{file_path.stem}_{TRANSACTION_TYPE}_results.csv"
     save_results_to_csv(backtest_results.trades, output_file)
 
     if enable_backtest_logging:
-        telemetry_file = file_path.parent / f"{file_path.stem}_step_by_step.csv"
+        telemetry_file = file_path.parent / f"{file_path.stem}_{TRANSACTION_TYPE}_step_by_step.csv"
         save_results_to_csv(backtest_results.telemetry, telemetry_file)
         print(f"[INFO] Telemetry saved successfully to: {telemetry_file}")
 
-    summary_file = file_path.parent / f"{file_path.stem}_summary.csv"
+    summary_file = file_path.parent / f"{file_path.stem}_{TRANSACTION_TYPE}_summary.csv"
     save_results_to_csv([backtest_results.summary], summary_file)
 
 
