@@ -11,13 +11,14 @@ DATE_FORMAT = "%Y.%m.%d %H:%M:%S"
 
 REQUIRED_COLUMNS = [
     'timestamp', 'open', 'high', 'low', 'close',
+    'high_timestamp',
     'high_open', 'high_high', 'high_low', 'high_close',
     'fractal_low', 'fractal_high'
 ]
 
 LOT_SIZE_DEFAULT = 1
 RISK_REWARD_RATIO = 1
-TRANSACTION_TYPE = 'SELL'
+TRANSACTION_TYPE = 'BUY'
 BREAKEVEN_MODIFICATION = 0.1
 STOP_LOSS_BUFFER = 0.9
 BREAKEVEN = False
@@ -63,13 +64,35 @@ class MarketState:
     last_high_fractal_value: float | None = None
 
 
-def is_last_fractal_visible(timestamp: datetime, last_fractal_time: datetime) -> bool:
+def detect_high_timeframe_seconds(df: pd.DataFrame) -> int:
+
+    high_timestamps = (
+        df['high_timestamp']
+        .dropna()
+        .drop_duplicates()
+        .sort_values()
+        .reset_index(drop=True)
+    )
+
+    if len(high_timestamps) < 2:
+        sys.exit("[ERROR] cannot detect high timeframe")
+
+    deltas = high_timestamps.diff().dropna()
+
+    timeframe_seconds = int(
+        deltas.mode().iloc[0].total_seconds()
+    )
+
+    return timeframe_seconds
+
+
+def is_last_fractal_visible(timestamp: datetime, last_fractal_time: datetime, high_tf_seconds: int) -> bool:
     if timestamp is None or last_fractal_time is None:
         return False
-    return (timestamp - last_fractal_time).total_seconds() >= 7200
+    return (timestamp - last_fractal_time).total_seconds() >= high_tf_seconds * 2     # <- visibility after 2 bars! no lookahead bias
 
 
-def is_signal(state: MarketState, transaction_type: str) -> bool:
+def is_signal(state: MarketState, transaction_type: str, high_tf_seconds: int) -> bool:
     if transaction_type == 'BUY':
         last_fractal_time = state.last_low_fractal_appearance_time
         if state.last_low_fractal_appearance_time is None:
@@ -85,7 +108,7 @@ def is_signal(state: MarketState, transaction_type: str) -> bool:
     else:
         print("unsupported transaction type")
         return False
-    return is_last_fractal_visible(state.timestamp, last_fractal_time)
+    return is_last_fractal_visible(state.timestamp, last_fractal_time, high_tf_seconds)
 
 
 def calculate_stop_loss(state: MarketState, transaction_type: str) -> float:
@@ -221,7 +244,14 @@ def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
     df['timestamp'] = pd.to_datetime(df['timestamp'], format=DATE_FORMAT, errors="coerce")
     df = df.dropna(subset=['timestamp'])
 
-    float_columns = REQUIRED_COLUMNS[1:]
+    df['high_timestamp'] = pd.to_datetime(df['high_timestamp'], format=DATE_FORMAT, errors='coerce')
+    df = df.dropna(subset=['high_timestamp'])
+
+    float_columns = [
+        'open', 'high', 'low', 'close',
+        'high_open', 'high_high', 'high_low', 'high_close',
+        'fractal_low', 'fractal_high'
+    ]
     df[float_columns] = df[float_columns].apply(pd.to_numeric, errors="coerce")
 
     return df
@@ -236,7 +266,7 @@ def save_results_to_csv(results: list, output: Path) -> None:
     results_df.to_csv(output, sep=";", date_format=DATE_FORMAT, index=False)
 
 
-def run_backtest(df: pd.DataFrame, enable_logging=True) -> BacktestResult:
+def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) -> BacktestResult:
     print("[INFO] start running backtest")
     trade_logs = []
     telemetry_logs = []
@@ -269,7 +299,7 @@ def run_backtest(df: pd.DataFrame, enable_logging=True) -> BacktestResult:
                     state.last_high_fractal_value = row.fractal_high
 
         if not in_position:
-            if is_signal(state, TRANSACTION_TYPE):
+            if is_signal(state, TRANSACTION_TYPE, high_tf_seconds):
                 stop_loss = calculate_stop_loss(state, TRANSACTION_TYPE)
                 take_profit = calculate_take_profit(state, TRANSACTION_TYPE, stop_loss)
                 current_trade = open_position(state, TRANSACTION_TYPE, stop_loss, take_profit)
@@ -331,7 +361,14 @@ def main():
     print(f"[INFO] head: {df.head()}")
     print(f"[INFO] tail: {df.tail()}")
 
-    backtest_results = run_backtest(df)
+    high_tf_seconds = detect_high_timeframe_seconds(df)
+
+    print(
+        f"[INFO] detected high timeframe: "
+        f"{high_tf_seconds} seconds"
+    )
+
+    backtest_results = run_backtest(df, high_tf_seconds)
     output_file = file_path.parent/f"{file_path.stem}_results.csv"
     save_results_to_csv(backtest_results.trades, output_file)
 

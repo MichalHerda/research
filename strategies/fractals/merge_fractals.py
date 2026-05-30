@@ -49,6 +49,7 @@ def main():
     high_tf = high_tf.sort_values('timestamp')
 
     high_tf = high_tf.rename(columns={
+        'timestamp': 'high_timestamp',
         'open': 'high_open',
         'high': 'high_high',
         'low': 'high_low',
@@ -60,7 +61,8 @@ def main():
     merged = pd.merge_asof(
         low_tf,
         high_tf,
-        on='timestamp',
+        left_on='timestamp',
+        right_on='high_timestamp',
         direction='backward'
     )
 
