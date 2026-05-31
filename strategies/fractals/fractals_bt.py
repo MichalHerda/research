@@ -18,12 +18,16 @@ REQUIRED_COLUMNS = [
 
 LOT_SIZE_DEFAULT = 1
 RISK_REWARD_RATIO = 1.1
-TRANSACTION_TYPE = 'SELL'
+TRANSACTION_TYPE = 'BUY'
 BREAKEVEN_MODIFICATION = 0.1
 STOP_LOSS_BUFFER = 0.9
-BREAKEVEN = False
+BREAKEVEN = True
 SPREAD = 0.7
 MAX_SPREAD_PERCENTAGE = 10
+BE_ACTIVATION = 0.5
+BE_MODIFICATION = 1
+BE_BARS = 15
+POINT = 0.01
 
 
 @dataclass
@@ -44,6 +48,8 @@ class Trade:
     stop_loss: float = 0.0
     take_profit: float = 0.0
     result: str | None = None
+    breakeven_applied: bool = False
+    open_bar_index: int = 0
 
     def close(self, close_time: datetime, close_price: float, result: str):
         self.close_time = close_time
@@ -144,9 +150,9 @@ def enforce_minimum_stop_loss(
 
 def calculate_stop_loss(state: MarketState, transaction_type: str) -> float:
     if transaction_type == 'BUY':
-        return state.last_low_fractal_value - STOP_LOSS_BUFFER
+        return state.last_low_fractal_value - SPREAD
     elif transaction_type == 'SELL':
-        return state.last_high_fractal_value + STOP_LOSS_BUFFER
+        return state.last_high_fractal_value + SPREAD
     else:
         print("calculate_stop_loss: unsupported transaction type")
         return 0
@@ -166,27 +172,16 @@ def calculate_take_profit(state: MarketState, transaction_type: str, stop_loss: 
         return 0
 
 
-def is_breakeven_condition(state: MarketState, current_trade: Trade) -> bool:
-    # Prototype stub for strategy exit logic
-    raise NotImplementedError("is_breakeven_condition not implemented")
-
-
-def apply_breakeven(current_trade: Trade) -> None:
-    if current_trade.transaction_type == "BUY":
-        current_trade.stop_loss = current_trade.open_price + BREAKEVEN_MODIFICATION
-        return
-    if current_trade.transaction_type == "SELL":
-        current_trade.stop_loss = current_trade.open_price - BREAKEVEN_MODIFICATION
-        return
-    print(f"[ERROR] unsupported transaction type: {current_trade.transaction_type}")
-
-
 def open_position(state: MarketState, transaction_type: str, stop_loss: float, take_profit: float) -> Trade:
+    if transaction_type == 'BUY':
+        open_price = state.open + SPREAD
+    else:
+        open_price = state.open
     return Trade(
         transaction_type=transaction_type,
         open_time=state.timestamp,
         lot_size=LOT_SIZE_DEFAULT,
-        open_price=state.open,
+        open_price=open_price,
         stop_loss=stop_loss,
         take_profit=take_profit
     )
@@ -196,9 +191,9 @@ def close_position(state: MarketState, current_trade: Trade, trade_result: str) 
     close_price = 0
     if trade_result == 'TP':
         close_price = current_trade.take_profit
-    if trade_result == 'SL':
+    if trade_result == 'SL' or trade_result == "BE":
         close_price = current_trade.stop_loss
-    if trade_result != 'TP' and trade_result != 'SL':
+    if trade_result != 'TP' and trade_result != 'SL' and trade_result != "BE":
         print(f"close position trade result not supported: {trade_result}")
     current_trade.close(state.timestamp, close_price, trade_result)
 
@@ -207,7 +202,7 @@ def is_stop_loss_reached(state: MarketState, current_trade: Trade) -> bool:
     if current_trade.transaction_type == 'BUY':
         return state.low <= current_trade.stop_loss
     if current_trade.transaction_type == 'SELL':
-        return state.high >= current_trade.stop_loss
+        return state.high + SPREAD >= current_trade.stop_loss
     return False
 
 
@@ -215,8 +210,47 @@ def is_take_profit_reached(state: MarketState, current_trade: Trade) -> bool:
     if current_trade.transaction_type == 'BUY':
         return state.high >= current_trade.take_profit
     if current_trade.transaction_type == 'SELL':
-        return state.low <= current_trade.take_profit
+        return state.low + SPREAD <= current_trade.take_profit
     return False
+
+
+def is_price_be_condition(state: MarketState, current_trade: Trade) -> bool:
+    if current_trade.breakeven_applied:
+        return False
+    if current_trade.transaction_type == 'BUY':
+        activation_level = current_trade.open_price + ((current_trade.take_profit - current_trade.open_price) * BE_ACTIVATION)
+        return state.high >= activation_level
+    if current_trade.transaction_type == 'SELL':
+        activation_level = current_trade.open_price - ((current_trade.open_price - current_trade.take_profit) * BE_ACTIVATION)
+        return state.low <= activation_level
+    return False
+
+
+def is_time_be_condition(state: MarketState, current_trade: Trade, bar_index: int) -> bool:
+    if current_trade.breakeven_applied:
+        return False
+    bars_since_open = bar_index - current_trade.open_bar_index
+    if bars_since_open < BE_BARS:
+        return False
+    if current_trade.transaction_type == 'BUY':
+        new_sl = current_trade.open_price + BE_MODIFICATION * POINT
+        return state.open > new_sl and new_sl > current_trade.stop_loss
+    if current_trade.transaction_type == 'SELL':
+        new_sl = current_trade.open_price - BE_MODIFICATION * POINT
+        print(f"[DEBUG] time BE check: open={state.open}, new_sl={new_sl}, current_sl={current_trade.stop_loss}")
+        return state.open < new_sl and new_sl < current_trade.stop_loss
+    return False
+
+
+def apply_breakeven(current_trade: Trade) -> None:
+    if current_trade.transaction_type == "BUY":
+        current_trade.stop_loss = current_trade.open_price + BE_MODIFICATION * POINT
+    elif current_trade.transaction_type == "SELL":
+        current_trade.stop_loss = current_trade.open_price - BE_MODIFICATION * POINT
+    else:
+        print(f"[ERROR] unsupported transaction type: {current_trade.transaction_type}")
+        return
+    current_trade.breakeven_applied = True
 
 
 def append_trade_logs(current_trade: Trade, trade_logs: list) -> None:
@@ -240,14 +274,16 @@ def append_backtest_logs(state: MarketState, in_position: bool, current_trade: T
         'close_price': state.close,
         'current_sl': None,
         'current_tp': None,
-        'trade_type': None
+        'trade_type': None,
     }
 
     if in_position and current_trade is not None:
         log_entry['current_sl'] = current_trade.stop_loss
         log_entry['current_tp'] = current_trade.take_profit
         log_entry['trade_type'] = current_trade.transaction_type
+        log_entry['breakeven_applied'] = current_trade.breakeven_applied
     else:
+        log_entry['breakeven_applied'] = False
         if TRANSACTION_TYPE == 'BUY':
             log_entry['last_low_fractal_value'] = state.last_low_fractal_value
             log_entry['last_low_fractal_appearance_time'] = state.last_low_fractal_appearance_time
@@ -306,11 +342,14 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
     state = MarketState()
     summary = {
         "TP": 0,
-        "SL": 0
+        "SL": 0,
+        "BE": 0
     }
+    bar_index = 0
 
     for row in df.itertuples(index=False):
 
+        bar_index += 1
         state.timestamp = row.timestamp
         state.open = row.open
         state.high = row.high
@@ -335,6 +374,7 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
                 stop_loss = enforce_minimum_stop_loss(state, TRANSACTION_TYPE, stop_loss)
                 take_profit = calculate_take_profit(state, TRANSACTION_TYPE, stop_loss)
                 current_trade = open_position(state, TRANSACTION_TYPE, stop_loss, take_profit)
+                current_trade.open_bar_index = bar_index
                 in_position = True
 
                 if TRANSACTION_TYPE == 'BUY':
@@ -349,8 +389,14 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
             # to keep the backtest realistic and avoid overestimating strategy performance.
 
             if is_stop_loss_reached(state, current_trade):
-                close_position(state, current_trade, 'SL')
-                summary["SL"] += 1
+                # summary["SL"] += 1
+                if current_trade.breakeven_applied:
+                    close_position(state, current_trade, 'BE')
+                    summary["BE"] += 1
+                else:
+                    close_position(state, current_trade, 'SL')
+                    summary["SL"] += 1
+
                 append_trade_logs(current_trade, trade_logs)
                 if enable_logging:
                     append_backtest_logs(state, in_position, current_trade, telemetry_logs)
@@ -368,8 +414,11 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
                 in_position = False
                 continue
 
-            if BREAKEVEN and is_breakeven_condition(state, current_trade):
-                apply_breakeven(current_trade)
+            if BREAKEVEN:
+                if is_price_be_condition(state, current_trade):
+                    apply_breakeven(current_trade)
+                elif is_time_be_condition(state, current_trade, bar_index):
+                    apply_breakeven(current_trade)
 
         if enable_logging:
             append_backtest_logs(state, in_position, current_trade, telemetry_logs)
