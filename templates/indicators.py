@@ -89,6 +89,7 @@ def compute_fractals(df):
     )
 
 
+"""
 # version no last visible fractals:
 def compute_fractals_(df):
     high = df['high']
@@ -110,5 +111,31 @@ def compute_fractals_(df):
 
     df['fractal_low'] = df['low'].where(fractal_low_raw)
     df['fractal_high'] = df['high'].where(fractal_high_raw)
+
+    return df
+"""
+
+
+def compute_proto_fractals(df):
+    high = df['high']
+    low = df['low']
+    open = df['open']
+
+    fractal_high_raw = (
+        (high.shift(2) > open) &
+        (high.shift(2) > high.shift(1)) &
+        (high.shift(2) > high.shift(3))
+        # (high.shift(2) > high.shift(4))
+    )
+
+    fractal_low_raw = (
+        (low.shift(2) < open) &
+        (low.shift(2) < low.shift(1)) &
+        (low.shift(2) < low.shift(3))
+        # (low.shift(2) < low.shift(4))
+    )
+
+    df['fractal_high'] = df['high'].where(fractal_high_raw.shift(-2))
+    df['fractal_low'] = df['low'].where(fractal_low_raw.shift(-2))
 
     return df

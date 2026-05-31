@@ -5,7 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 
-def compute_fractals(df):
+def compute_proto_fractals(df):
     high = df['high']
     low = df['low']
     open = df['open']
@@ -24,8 +24,6 @@ def compute_fractals(df):
         # (low.shift(2) < low.shift(4))
     )
 
-    # df['fractal_low'] = df['low'].shift(2).where(fractal_low_raw)
-    # df['fractal_high'] = df['high'].shift(2).where(fractal_high_raw)
     df['fractal_high'] = df['high'].where(fractal_high_raw.shift(-2))
     df['fractal_low'] = df['low'].where(fractal_low_raw.shift(-2))
 
@@ -65,7 +63,7 @@ def main():
 
     print(f"[INFO] Rows loaded: {len(df)}")
 
-    df = compute_fractals(df)
+    df = compute_proto_fractals(df)
 
     # Liczenie ile faktycznie fraktali wpadło (dla weryfikacji)
     print(f"[INFO] Found fractals high: {df['fractal_high'].notna().sum()}")

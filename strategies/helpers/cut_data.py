@@ -27,6 +27,9 @@ import sys
 import pandas as pd
 
 
+DATE_FORMAT = "%Y.%m.%d %H:%M:%S"
+
+
 def main():
     if len(sys.argv) != 3:
         print("Użycie: python3 cut_data.py <data_file> <periods_file>")
@@ -68,7 +71,7 @@ def main():
 
         # ===== Zapis =====
         output_file = data_file.replace('.csv', '_cut.csv')
-        result.to_csv(output_file, sep=';', index=False)
+        result.to_csv(output_file, sep=";", index=False, date_format=DATE_FORMAT)
 
         print(f"Zapisano: {output_file} ({len(result)} wierszy)")
 
