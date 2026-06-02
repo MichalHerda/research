@@ -1,4 +1,5 @@
 # version based on new template: backtest_tpl.py
+# using proto fractals as entry signal - exit signal is relation between bar1 & bar2 average
 
 import pandas as pd
 import sys
@@ -35,6 +36,7 @@ class BacktestResult:
     trades: list
     telemetry: list
     summary: dict
+    equity: list
 
 
 @dataclass
@@ -50,6 +52,7 @@ class Trade:
     result: str | None = None
     breakeven_applied: bool = False
     open_bar_index: int = 0
+    initial_sl_distance: float = 0.0        # initial stop loss registred during opening (constant)
 
     def close(self, close_time: datetime, close_price: float, result: str):
         self.close_time = close_time
@@ -70,10 +73,12 @@ class MarketState:
     last_high_fractal_appearance_time: datetime | None = None
     last_high_fractal_used_time: datetime | None = None
     last_high_fractal_value: float | None = None
+    prev_high_bar_avg: float | None = None                                      # HTF last bar average
+    curr_high_bar_avg: float | None = None                                      # HTF current bar average
+    last_seen_high_timestamp: datetime | None = None                            # HTF new bar detection
 
 
 def detect_high_timeframe_seconds(df: pd.DataFrame) -> int:
-
     high_timestamps = (
         df['high_timestamp']
         .dropna()
@@ -92,6 +97,36 @@ def detect_high_timeframe_seconds(df: pd.DataFrame) -> int:
     )
 
     return timeframe_seconds
+
+
+"""
+def is_new_high_bar(state: MarketState, row) -> bool:
+    # Returns True when the row belongs to a new HTF bar (high_timestamp has changed)
+    return (
+        row.high_timestamp is not None
+        and state.last_seen_high_timestamp != row.high_timestamp
+    )
+"""
+
+
+def is_new_high_bar(state: MarketState, row) -> bool:
+    if pd.isnull(row.high_timestamp):
+        return False
+    return state.last_seen_high_timestamp != row.high_timestamp
+
+
+def is_dynamic_exit(state: MarketState, current_trade: Trade) -> bool:
+    """
+    We only check when we have two full HTF bars to compare.
+    prev_high_bar_avg = bar_2, curr_high_bar_avg = bar_1
+    """
+    if state.prev_high_bar_avg is None or state.curr_high_bar_avg is None:
+        return False
+    if current_trade.transaction_type == 'BUY':
+        return state.curr_high_bar_avg < state.prev_high_bar_avg
+    if current_trade.transaction_type == 'SELL':
+        return state.curr_high_bar_avg > state.prev_high_bar_avg
+    return False
 
 
 def is_last_fractal_visible(timestamp: datetime, last_fractal_time: datetime, high_tf_seconds: int) -> bool:
@@ -193,7 +228,9 @@ def close_position(state: MarketState, current_trade: Trade, trade_result: str) 
         close_price = current_trade.take_profit
     if trade_result == 'SL' or trade_result == "BE":
         close_price = current_trade.stop_loss
-    if trade_result != 'TP' and trade_result != 'SL' and trade_result != "BE":
+    if trade_result == 'DX':
+        close_price = state.open
+    if trade_result != 'TP' and trade_result != 'SL' and trade_result != "BE" and trade_result != "DX":
         print(f"close position trade result not supported: {trade_result}")
     current_trade.close(state.timestamp, close_price, trade_result)
 
@@ -253,7 +290,35 @@ def apply_breakeven(current_trade: Trade) -> None:
     current_trade.breakeven_applied = True
 
 
+def calculate_r_multiple(trade: Trade) -> float:                    # calculate what percentage of SL is DX
+    if trade.initial_sl_distance == 0:
+        return 0.0
+    if trade.transaction_type == 'BUY':
+        raw_pnl = trade.close_price - trade.open_price
+    elif trade.transaction_type == 'SELL':
+        raw_pnl = trade.open_price - trade.close_price
+    else:
+        return 0.0
+    return round(raw_pnl / trade.initial_sl_distance, 4)
+
+
+def calculate_equity_curve(trade_logs: list) -> list:
+    equity = 0.0
+    result = []
+    for trade in trade_logs:
+        equity = equity + trade['r_multiple']
+        result.append({
+            'open_time': trade['open_time'],
+            'close_time': trade['close_time'],
+            'result': trade['result'],
+            'r_multiple': trade['r_multiple'],
+            'equity_r': round(equity, 4)
+        })
+    return result
+
+
 def append_trade_logs(current_trade: Trade, trade_logs: list) -> None:
+    r_multiple = calculate_r_multiple(current_trade)
     trade_logs.append({
         'transaction_type': current_trade.transaction_type,
         'open_time': current_trade.open_time,
@@ -262,8 +327,10 @@ def append_trade_logs(current_trade: Trade, trade_logs: list) -> None:
         'open_price': current_trade.open_price,
         'close_price': current_trade.close_price,
         'stop_loss': current_trade.stop_loss,
+        'initial_sl_distance': current_trade.initial_sl_distance,
         'take_profit': current_trade.take_profit,
-        'result': current_trade.result
+        'result': current_trade.result,
+        'r_multiple': r_multiple
     })
 
 
@@ -343,7 +410,9 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
     summary = {
         "TP": 0,
         "SL": 0,
-        "BE": 0
+        "BE": 0,
+        "DX": 0,
+        "total_r": 0.0
     }
     bar_index = 0
 
@@ -368,6 +437,13 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
                     state.last_high_fractal_appearance_time = row.timestamp
                     state.last_high_fractal_value = row.fractal_high
 
+        htf_bar_changed = is_new_high_bar(state, row)   # zapamiętaj PRZED aktualizacją
+
+        if htf_bar_changed:
+            state.prev_high_bar_avg = state.curr_high_bar_avg
+            state.curr_high_bar_avg = (row.high_high + row.high_low) / 2
+            state.last_seen_high_timestamp = row.high_timestamp
+
         if not in_position:
             if is_signal(state, TRANSACTION_TYPE, high_tf_seconds):
                 stop_loss = calculate_stop_loss(state, TRANSACTION_TYPE)
@@ -375,6 +451,7 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
                 take_profit = calculate_take_profit(state, TRANSACTION_TYPE, stop_loss)
                 current_trade = open_position(state, TRANSACTION_TYPE, stop_loss, take_profit)
                 current_trade.open_bar_index = bar_index
+                current_trade.initial_sl_distance = abs(current_trade.open_price - current_trade.stop_loss)
                 in_position = True
 
                 if TRANSACTION_TYPE == 'BUY':
@@ -396,37 +473,43 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
                 else:
                     close_position(state, current_trade, 'SL')
                     summary["SL"] += 1
-
+                summary["total_r"] = round(summary["total_r"] + calculate_r_multiple(current_trade), 4)
                 append_trade_logs(current_trade, trade_logs)
+
                 if enable_logging:
                     append_backtest_logs(state, in_position, current_trade, telemetry_logs)
                 current_trade = None
                 in_position = False
                 continue
 
-            if is_take_profit_reached(state, current_trade):
-                close_position(state, current_trade, 'TP')
-                summary["TP"] += 1
-                append_trade_logs(current_trade, trade_logs)
-                if enable_logging:
-                    append_backtest_logs(state, in_position, current_trade, telemetry_logs)
-                current_trade = None
-                in_position = False
-                continue
+            if htf_bar_changed:
+                if is_dynamic_exit(state, current_trade):
+                    close_position(state, current_trade, 'DX')   # DX = Dynamic Exit
+                    summary["DX"] += 1
+                    summary["total_r"] = round(summary["total_r"] + calculate_r_multiple(current_trade), 4)
+                    append_trade_logs(current_trade, trade_logs)
+                    if enable_logging:
+                        append_backtest_logs(state, in_position, current_trade, telemetry_logs)
+                    current_trade = None
+                    in_position = False
+                    continue
 
             if BREAKEVEN:
                 if is_price_be_condition(state, current_trade):
                     apply_breakeven(current_trade)
-                elif is_time_be_condition(state, current_trade, bar_index):
-                    apply_breakeven(current_trade)
+                # elif is_time_be_condition(state, current_trade, bar_index):
+                #    apply_breakeven(current_trade)
 
         if enable_logging:
             append_backtest_logs(state, in_position, current_trade, telemetry_logs)
 
+    equity_curve = calculate_equity_curve(trade_logs)
+
     return BacktestResult(
         trades=trade_logs,
         telemetry=telemetry_logs,
-        summary=summary
+        summary=summary,
+        equity=equity_curve
     )
 
 
@@ -460,6 +543,9 @@ def main():
 
     summary_file = file_path.parent / f"{file_path.stem}_{TRANSACTION_TYPE}_summary.csv"
     save_results_to_csv([backtest_results.summary], summary_file)
+
+    equity_file = file_path.parent / f"{file_path.stem}_{TRANSACTION_TYPE}_equity.csv"
+    save_results_to_csv(backtest_results.equity, equity_file)
 
 
 if __name__ == "__main__":
