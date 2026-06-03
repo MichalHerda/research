@@ -1,5 +1,5 @@
 # version based on new template: backtest_tpl.py
-# using proto fractals as entry signal - exit signal is relation between bar1 & bar2 average
+# using proto fractals as entry signal - exit signal is relation between bar1 & bar2 averages
 
 import pandas as pd
 import sys
@@ -19,7 +19,7 @@ REQUIRED_COLUMNS = [
 
 LOT_SIZE_DEFAULT = 1
 RISK_REWARD_RATIO = 1.1
-TRANSACTION_TYPE = 'SELL'
+TRANSACTION_TYPE = 'BUY'
 BREAKEVEN_MODIFICATION = 0.1
 STOP_LOSS_BUFFER = 0.9
 BREAKEVEN = True
@@ -73,8 +73,8 @@ class MarketState:
     last_high_fractal_appearance_time: datetime | None = None
     last_high_fractal_used_time: datetime | None = None
     last_high_fractal_value: float | None = None
-    prev_high_bar_avg: float | None = None                                      # HTF last bar average
-    curr_high_bar_avg: float | None = None                                      # HTF current bar average
+    idx1_high_bar_avg: float | None = None                                      # HTF last bar average
+    idx2_high_bar_avg: float | None = None                                      # HTF current bar average
     last_seen_high_timestamp: datetime | None = None                            # HTF new bar detection
 
 
@@ -116,16 +116,12 @@ def is_new_high_bar(state: MarketState, row) -> bool:
 
 
 def is_dynamic_exit(state: MarketState, current_trade: Trade) -> bool:
-    """
-    We only check when we have two full HTF bars to compare.
-    prev_high_bar_avg = bar_2, curr_high_bar_avg = bar_1
-    """
-    if state.prev_high_bar_avg is None or state.curr_high_bar_avg is None:
+    if state.idx1_high_bar_avg is None or state.idx2_high_bar_avg is None:
         return False
     if current_trade.transaction_type == 'BUY':
-        return state.curr_high_bar_avg < state.prev_high_bar_avg
+        return state.idx1_high_bar_avg < state.idx2_high_bar_avg
     if current_trade.transaction_type == 'SELL':
-        return state.curr_high_bar_avg > state.prev_high_bar_avg
+        return state.idx1_high_bar_avg > state.idx2_high_bar_avg
     return False
 
 
@@ -342,6 +338,9 @@ def append_backtest_logs(state: MarketState, in_position: bool, current_trade: T
         'current_sl': None,
         'current_tp': None,
         'trade_type': None,
+        'last_seen_high_timestamp': state.last_seen_high_timestamp,
+        'idx1_high_bar_avg': state.idx1_high_bar_avg,
+        'idx2_high_bar_avg': state.idx2_high_bar_avg
     }
 
     if in_position and current_trade is not None:
@@ -415,6 +414,7 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
         "total_r": 0.0
     }
     bar_index = 0
+    new_avg = 0
 
     for row in df.itertuples(index=False):
 
@@ -437,11 +437,12 @@ def run_backtest(df: pd.DataFrame, high_tf_seconds: int, enable_logging=True) ->
                     state.last_high_fractal_appearance_time = row.timestamp
                     state.last_high_fractal_value = row.fractal_high
 
-        htf_bar_changed = is_new_high_bar(state, row)   # zapamiętaj PRZED aktualizacją
+        htf_bar_changed = is_new_high_bar(state, row)
 
         if htf_bar_changed:
-            state.prev_high_bar_avg = state.curr_high_bar_avg
-            state.curr_high_bar_avg = (row.high_high + row.high_low) / 2
+            state.idx2_high_bar_avg = state.idx1_high_bar_avg
+            state.idx1_high_bar_avg = new_avg
+            new_avg = (row.high_high + row.high_low) / 2
             state.last_seen_high_timestamp = row.high_timestamp
 
         if not in_position:
@@ -550,3 +551,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    print("*********COMPLETED*********")
