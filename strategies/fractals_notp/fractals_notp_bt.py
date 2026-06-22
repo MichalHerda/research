@@ -1,3 +1,4 @@
+# fractals_notp.py
 # version based on new template: backtest_tpl.py
 # using proto fractals as entry signal - exit signal is relation between bar1 & bar2 averages
 

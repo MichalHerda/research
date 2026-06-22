@@ -1,3 +1,5 @@
+# backtest_nonfui.py
+
 """
 Backtest: NonFuiFuiNonSumNonCuro
 Biblioteka: backtesting.py
