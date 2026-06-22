@@ -124,14 +124,6 @@ It is intended primarily as a teaching aid and as the smallest possible starting
 
 ---
 
-### `[SP500]_M5_merged.csv`
-
-Example dataset used for testing and validating the templates.
-
-The file allows quick experimentation without requiring users to prepare their own data sources before exploring the provided boilerplates.
-
----
-
 ## Philosophy
 
 These templates exist to optimize researcher time rather than execution speed.
