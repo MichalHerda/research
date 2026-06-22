@@ -1,4 +1,5 @@
 # collection of market indicators for reusing purposes
+# indicators.py
 
 import numpy as np
 import pandas as pd

@@ -1,3 +1,5 @@
+# delete_forbidden.py
+
 """
 Forbidden Financial Symbols Directory Cleaner
 

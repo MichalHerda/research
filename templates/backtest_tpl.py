@@ -1,3 +1,4 @@
+# backtest_tpl.py
 # NOTE: This boilerplate is designed specifically for path-dependent trading strategies
 # where state transitions (like trailing stops, multi-stage entries, or time-window visibility)
 # depend strictly on the previous step's context. Since these strategies cannot be safely
