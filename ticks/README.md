@@ -580,3 +580,94 @@ Example:
 ```
 
 The implementation relies exclusively on Python's standard library, making it suitable for research workflows, reproducible preprocessing pipelines, and deployment on minimal environments without additional dependencies.
+
+# slice_period.py
+
+`slice_period.py` is a generic intraday filtering tool for time-series CSV datasets.
+
+It is designed to operate independently of data semantics, making it suitable for:
+- raw MT4 tick data
+- aggregated OHLC tick bars
+- any structured CSV dataset containing a time column
+
+### Input format
+
+The only requirement is the presence of a time column named:
+
+- `datetime`
+- `timestamp`
+
+Example supported inputs:
+
+```text
+datetime;bid;ask
+2026.06.23 15:30:00.125;7483.95;7484.65
+```
+
+or
+
+```text
+timestamp;open;high;low;close
+2026.06.23 15:30:00.125;7483.95;7484.26;7483.82;7484.07
+```
+
+All other columns are treated as opaque payload and preserved unchanged.
+
+### Usage
+
+```bash
+python3 slice_period.py <file_or_directory> "<HH:MM - HH:MM>"
+```
+
+### Time window format
+
+```text
+HH:MM - HH:MM
+```
+
+Example:
+
+```text
+15:30 - 16:00
+```
+
+The interval is interpreted as:
+
+```text
+start_time <= time < end_time
+```
+
+### Examples
+
+Slice SP500 dataset for U.S. cash session window:
+
+```bash
+python3 slice_period.py ./SP500 "15:30 - 16:00"
+```
+
+Slice a single file:
+
+```bash
+python3 slice_period.py [SP500]_2026-06-23.csv "09:00 - 11:30"
+```
+
+### Output
+
+A new directory is created automatically:
+
+```text
+<input_name>_<HH-MM_HH-MM>
+```
+
+Example:
+
+```text
+SP500_15-30_16-00
+```
+
+The directory preserves:
+- number of input files
+- filenames
+- original structure
+
+Only rows outside the specified intraday window are removed.
