@@ -515,3 +515,68 @@ Each dashboard is a single self-contained `.html` file (no server, no install).
 - The tool is safe to re-run — output folders are created if missing and files are overwritten.
 - Timestamps within a file are **sorted before analysis**, so out-of-order ticks in a
   source file do not create false gaps.
+
+# agg_quant.py
+
+`agg_quant.py` is a lightweight command-line utility for converting raw MT4 tick data into fixed-size tick OHLC bars.
+
+The script expects MT4-exported CSV files in the following format:
+
+```text
+datetime;bid;ask
+2026.06.23 01:00:08.085;7483.95;7484.65
+2026.06.23 01:00:08.324;7484.07;7484.77
+...
+```
+
+Only the **BID** price stream is used during aggregation. The resulting output contains the following fields:
+
+```text
+timestamp;open;high;low;close
+```
+
+where:
+
+- `timestamp` – timestamp of the first tick in the bar,
+- `open` – BID price of the first tick,
+- `high` – highest BID price within the aggregation window,
+- `low` – lowest BID price within the aggregation window,
+- `close` – BID price of the last tick.
+
+Trailing incomplete bars are discarded.
+
+### Usage
+
+```bash
+python3 agg_quant.py <file_or_directory> <ticks_per_bar> <output_dir>
+```
+
+### Examples
+
+Aggregate a single file into 100-tick bars:
+
+```bash
+python3 agg_quant.py ticks.csv 100 aggregated
+```
+
+Aggregate all CSV files from a directory into 500-tick bars:
+
+```bash
+python3 agg_quant.py ./ticks/SP500 500 ./sp500_tickbars
+```
+
+Output files are written to the specified output directory using the following naming convention:
+
+```text
+<input_filename>_agg_<ticks_per_bar>.csv
+```
+
+Example:
+
+```text
+[SP500]_2026-06-23.csv
+↓
+[SP500]_2026-06-23_agg_500.csv
+```
+
+The implementation relies exclusively on Python's standard library, making it suitable for research workflows, reproducible preprocessing pipelines, and deployment on minimal environments without additional dependencies.

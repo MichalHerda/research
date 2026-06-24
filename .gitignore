@@ -34,6 +34,7 @@ zscore/output_H1
 zscore/monthly_classified
 
 *.csv
+*.csv#
 
 slope_ctx/sample_data
 
