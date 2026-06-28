@@ -49,6 +49,31 @@ def compute_ema_deviation(high, low, fast_ema, atr):
     )
 
 
+def get_input_files(path: Path) -> list[Path]:
+    """
+    Returns list of CSV files.
+    Input can be:
+    - single file
+    - directory with CSV files
+    """
+
+    if not path.exists():
+        sys.exit(f"[ERROR] Path does not exist: {path}")
+
+    if path.is_file():
+        return [path]
+
+    if path.is_dir():
+        files = sorted(path.rglob("*.csv"))
+
+        if not files:
+            sys.exit(f"[ERROR] No CSV files found in {path}")
+
+        return files
+
+    sys.exit(f"[ERROR] Unsupported path type: {path}")
+
+
 def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
     """
     Read CSV, columns presence validation, data conversion
@@ -72,38 +97,18 @@ def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
     return df
 
 
-def compute_proto_fractals(df):
-    high = df['high']
-    low = df['low']
-    open = df['open']
+def save_results_to_csv(results: pd.DataFrame, output: Path):
 
-    fractal_high_raw = (
-        (high.shift(2) > open) &
-        (high.shift(2) > high.shift(1)) &
-        (high.shift(2) > high.shift(3))
-        # (high.shift(2) > high.shift(4))
-    )
-
-    fractal_low_raw = (
-        (low.shift(2) < open) &
-        (low.shift(2) < low.shift(1)) &
-        (low.shift(2) < low.shift(3))
-        # (low.shift(2) < low.shift(4))
-    )
-
-    df['fractal_high'] = df['high'].where(fractal_high_raw.shift(-2))
-    df['fractal_low'] = df['low'].where(fractal_low_raw.shift(-2))
-
-    return df
-
-
-def save_results_to_csv(results: list, output: Path) -> None:
-    if not results:
+    if results.empty:
         print("[WARNING] no results to save")
         return
 
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(output, sep=";", date_format=DATE_FORMAT, index=False)
+    results.to_csv(
+        output,
+        sep=";",
+        date_format=DATE_FORMAT,
+        index=False,
+    )
 
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -115,8 +120,6 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     df["atr"] = compute_atr(df, 14)
     df["ema_dev"] = compute_ema_deviation(df["high"], df["low"], df["ema_fast"], df["atr"])
 
-    df = compute_proto_fractals(df)
-
     return df
 
 
@@ -124,19 +127,21 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(f"[ERROR] usage: python3 {Path(sys.argv[0]).name} <file>")
 
-    file_path = Path(sys.argv[1])
+    input_path = Path(sys.argv[1])
+    files = get_input_files(input_path)
 
-    df = load_and_clean_ohlcv(file_path)
-    print("[INFO] Data pipeline finished successfully.")
-    print(f"[INFO] head: {df.head()}")
-    print(f"[INFO] tail: {df.tail()}")
+    print(f"[INFO] Found {len(files)} file(s)")
 
-    features = add_features(df)
-    output_dir = file_path.parent / "features"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    for file_path in files:
+        df = load_and_clean_ohlcv(file_path)
+        print(f"[INFO] Processing {file_path.name}")
+        features = add_features(df)
+        output_dir = file_path.parent / "features"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / f"{file_path.stem}_features.csv"
+        save_results_to_csv(features, output_file)
 
-    output_file = output_dir / f"{file_path.stem}_features.csv"
-    save_results_to_csv(features, output_file)
+    print("[INFO] All files processed successfully.")
 
 
 if __name__ == "__main__":

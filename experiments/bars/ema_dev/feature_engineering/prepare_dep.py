@@ -4,6 +4,7 @@
 # Loop-based processing is only used for stateful or path-dependent logic.
 
 import pandas as pd
+import numpy as np
 import sys
 from pathlib import Path
 
@@ -14,29 +15,38 @@ REQUIRED_COLUMNS = [
 ]
 
 
-def get_input_files(path: Path) -> list[Path]:
-    """
-    Returns list of CSV files.
-    Input can be:
-    - single file
-    - directory with CSV files
-    """
+def compute_ema(series, period):
+    return series.ewm(
+        span=period,
+        adjust=False
+    ).mean()
 
-    if not path.exists():
-        sys.exit(f"[ERROR] Path does not exist: {path}")
 
-    if path.is_file():
-        return [path]
+def compute_atr(df, period):
+    high_low = df['high'] - df['low']
+    high_close = (df['high'] - df['close'].shift(1)).abs()
+    low_close = (df['low'] - df['close'].shift(1)).abs()
 
-    if path.is_dir():
-        files = sorted(path.rglob("*.csv"))
+    tr = pd.concat(
+        [high_low, high_close, low_close],
+        axis=1
+    ).max(axis=1)
 
-        if not files:
-            sys.exit(f"[ERROR] No CSV files found in {path}")
+    atr = tr.rolling(window=period).mean()
 
-        return files
+    return atr
 
-    sys.exit(f"[ERROR] Unsupported path type: {path}")
+
+def compute_ema_deviation(high, low, fast_ema, atr):
+
+    z_high = (high - fast_ema) / atr
+    z_low = (low - fast_ema) / atr
+
+    return np.where(
+        np.abs(z_high) >= np.abs(z_low),
+        z_high,
+        z_low
+    )
 
 
 def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
@@ -62,25 +72,23 @@ def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
     return df
 
 
-def save_results_to_csv(results: pd.DataFrame, output: Path):
-
-    if results.empty:
+def save_results_to_csv(results: list, output: Path) -> None:
+    if not results:
         print("[WARNING] no results to save")
         return
 
-    results.to_csv(
-        output,
-        sep=";",
-        date_format=DATE_FORMAT,
-        index=False,
-    )
+    results_df = pd.DataFrame(results)
+    results_df.to_csv(output, sep=";", date_format=DATE_FORMAT, index=False)
 
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
     print("[INFO] start appending features")
 
-    for row in df.itertuples(index=False):
-        pass
+    print("[INFO] start feature engineering")
+
+    df["ema_fast"] = compute_ema(df["close"], 20)
+    df["atr"] = compute_atr(df, 14)
+    df["ema_dev"] = compute_ema_deviation(df["high"], df["low"], df["ema_fast"], df["atr"])
 
     return df
 
@@ -89,21 +97,19 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(f"[ERROR] usage: python3 {Path(sys.argv[0]).name} <file>")
 
-    input_path = Path(sys.argv[1])
-    files = get_input_files(input_path)
+    file_path = Path(sys.argv[1])
 
-    print(f"[INFO] Found {len(files)} file(s)")
+    df = load_and_clean_ohlcv(file_path)
+    print("[INFO] Data pipeline finished successfully.")
+    print(f"[INFO] head: {df.head()}")
+    print(f"[INFO] tail: {df.tail()}")
 
-    for file_path in files:
-        df = load_and_clean_ohlcv(file_path)
-        print(f"[INFO] Processing {file_path.name}")
-        features = add_features(df)
-        output_dir = file_path.parent / "features"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_file = output_dir / f"{file_path.stem}_features.csv"
-        save_results_to_csv(features, output_file)
+    features = add_features(df)
+    output_dir = file_path.parent / "features"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("[INFO] All files processed successfully.")
+    output_file = output_dir / f"{file_path.stem}_features.csv"
+    save_results_to_csv(features, output_file)
 
 
 if __name__ == "__main__":
