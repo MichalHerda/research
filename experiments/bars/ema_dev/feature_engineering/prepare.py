@@ -93,6 +93,13 @@ def load_and_clean_ohlcv(file_path: Path) -> pd.DataFrame:
 
     float_columns = REQUIRED_COLUMNS[1:]
     df[float_columns] = df[float_columns].apply(pd.to_numeric, errors="coerce")
+    df = df.dropna(subset=float_columns)
+
+    df = (
+        df.sort_values("timestamp")
+        .drop_duplicates(subset="timestamp")
+        .reset_index(drop=True)
+    )
 
     return df
 
@@ -111,31 +118,37 @@ def save_results_to_csv(results: pd.DataFrame, output: Path):
     )
 
 
-def add_features(df: pd.DataFrame) -> pd.DataFrame:
+def add_features(df: pd.DataFrame, atr_period: int, ema_slow_period: int, ema_fast_period: int) -> pd.DataFrame:
     print("[INFO] start appending features")
 
     print("[INFO] start feature engineering")
 
-    df["ema_fast"] = compute_ema(df["close"], 20)
-    df["atr"] = compute_atr(df, 14)
+    df["ema_slow"] = compute_ema(df["close"], ema_slow_period)
+    df["ema_fast"] = compute_ema(df["close"], ema_fast_period)
+    df["atr"] = compute_atr(df, atr_period)
     df["ema_dev"] = compute_ema_deviation(df["high"], df["low"], df["ema_fast"], df["atr"])
+
+    df = df.dropna().reset_index(drop=True)
 
     return df
 
 
 def main():
-    if len(sys.argv) != 2:
-        sys.exit(f"[ERROR] usage: python3 {Path(sys.argv[0]).name} <file>")
+    if len(sys.argv) != 5:
+        sys.exit(f"[ERROR] usage: python3 {Path(sys.argv[0]).name} <file> <atr_period> <ema_slow_period> <ema_fast_period>")
 
     input_path = Path(sys.argv[1])
     files = get_input_files(input_path)
+    atr_period = int(sys.argv[2])
+    ema_slow_period = int(sys.argv[3])
+    ema_fast_period = int(sys.argv[4])
 
     print(f"[INFO] Found {len(files)} file(s)")
 
     for file_path in files:
         df = load_and_clean_ohlcv(file_path)
         print(f"[INFO] Processing {file_path.name}")
-        features = add_features(df)
+        features = add_features(df, atr_period, ema_slow_period, ema_fast_period)
         output_dir = file_path.parent / "features"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / f"{file_path.stem}_features.csv"
